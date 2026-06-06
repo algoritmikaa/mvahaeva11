@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Список задач</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Шапка с темой -->
+    <header class="app-header">
+        <h1 class="app-title">✨ Список задач</h1>
+        <button id="themeToggle" class="theme-btn" title="Переключить тему">
+            <span class="theme-icon">🌙</span>
+        </button>
+    </header>
+
+    <!-- Контейнер задач -->
+    <main class="container">
+        <div class="add-task-wrapper">
+            <button id="addTaskBtn" class="btn-add">
+                <span class="btn-plus">+</span> Добавить задачу
+            </button>
+        </div>
+
+        <div id="taskList" class="task-list">
+            <!-- Задачи генерируются динамически -->
+        </div>
+
+        <p id="emptyMessage" class="empty-message">
+            📋 Задач пока нет. Нажмите «Добавить задачу», чтобы начать.
+        </p>
+    </main>
+
+    <!-- Модальное окно добавления задачи -->
+    <div id="modalOverlay" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Новая задача</h2>
+                <button class="modal-close" id="modalClose">✕</button>
+            </div>
+            <form id="taskForm" class="modal-body">
+                <label>
+                    Название задачи
+                    <input type="text" id="taskTitle" placeholder="Введите название" required>
+                </label>
+                <div class="datetime-row">
+                    <label>
+                        Дата
+                        <input type="date" id="taskDate" required>
+                    </label>
+                    <label>
+                        Время
+                        <input type="time" id="taskTime" required>
+                    </label>
+                </div>
+                <label class="file-label">
+                    <span>📎 Прикрепить картинку</span>
+                    <input type="file" id="taskImage" accept="image/*">
+                    <small>Макс. 500 КБ</small>
+                </label>
+                <div class="modal-actions">
+                    <button type="submit" class="btn-submit">✅ Добавить</button>
+                    <button type="button" class="btn-cancel" id="modalCancel">Отмена</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        (function() {
+            // ---------- Хранилище и состояние ----------
+            const STORAGE_KEY = 'todoApp_tasks';
+            const THEME_KEY = 'todoApp_theme';
+            let tasks = [];
+
+            // DOM элементы
+            const taskListEl = document.getElementById('taskList');
+            const emptyMessageEl = document.getElementById('emptyMessage');
+            const addTaskBtn = document.getElementById('addTaskBtn');
+            const modalOverlay = document.getElementById('modalOverlay');
+            const modalClose = document.getElementById('modalClose');
+            const modalCancel = document.getElementById('modalCancel');
+            const taskForm = document.getElementById('taskForm');
+            const taskTitleInput = document.getElementById('taskTitle');
+            const taskDateInput = document.getElementById('taskDate');
+            const taskTimeInput = document.getElementById('taskTime');
+            const taskImageInput = document.getElementById('taskImage');
+            const themeToggle = document.getElementById('themeToggle');
+            const themeIcon = themeToggle.querySelector('.theme-icon');
+
+            // ---------- Инициализация ----------
+            function loadTasks() {
+                try {
+                    const stored = localStorage.getItem(STORAGE_KEY);
+                    if (stored) {
+                        tasks = JSON.parse(stored);
+                    } else {
+                        tasks = [];
+                    }
+                } catch (e) {
+                    tasks = [];
+                }
+                // Добавим поле reminded, если его нет (миграция)
+                tasks = tasks.map(t => ({ ...t, reminded: t.reminded || false }));
+                saveTasks();
+                renderTasks();
+            }
+
+            function saveTasks() {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+            }
+
+            // Запрос разрешения на уведомления
+            function requestNotificationPermission() {
+                if ('Notification' in window && Notification.permission === 'default') {
+                    Notification.requestPermission();
+                }
+            }
+
+            // ---------- Рендер задач ----------
+            function renderTasks() {
+                taskListEl.innerHTML = '';
+                if (tasks.length === 0) {
+                    emptyMessageEl.style.display = 'block';
+                } else {
+                    emptyMessageEl.style.display = 'none';
+                    tasks.forEach((task, index) => {
+                        const card = createTaskCard(task, index);
+                        taskListEl.appendChild(card);
+                    });
+                }
+            }
+
+            function createTaskCard(task, index) {
+                const card = document.createElement('div');
+                card.className = `task-card ${task.completed ? 'completed' : ''}`;
+                card.style.animationDelay = `${index * 0.05}s`;
+
+                // Чекбокс
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.className = 'task-checkbox';
+                checkbox.checked = task.completed;
+                checkbox.addEventListener('change', () => toggleComplete(task.id));
+
+                // Информация
+                const info = document.createElement('div');
+                info.className = 'task-info';
+
+                const title = document.createElement('div');
+                title.className = 'task-title';
+                title.textContent = task.title;
+
+                const meta = document.createElement('div');
+                meta.className = 'task-meta';
+                const dateStr = new Date(task.dateTime).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+                const timeStr = task.time;
+                meta.innerHTML = `📅 ${dateStr}  ⏰ ${timeStr}`;
+
+                // Миниатюра изображения
+                if (task.imageData) {
+                    const img = document.createElement('img');
+                    img.src = task.imageData;
+                    img.className = 'task-image';
+                    info.appendChild(title);
+                    info.appendChild(meta);
+                    info.appendChild(img);
+                } else {
+                    info.appendChild(title);
+                    info.appendChild(meta);
+                }
+
+                // Кнопка удаления
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'task-delete';
+                deleteBtn.innerHTML = '🗑️';
+                deleteBtn.title = 'Удалить задачу';
+                deleteBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    deleteTask(task.id);
+                });
+
+                card.appendChild(checkbox);
+                card.appendChild(info);
+                card.appendChild(deleteBtn);
+                return card;
+            }
+
+            // ---------- Действия с задачами ----------
+            function addTask(title, date, time, imageData) {
+                const dateTime = `${date}T${time}`;
+                const newTask = {
+                    id: Date.now(),
+                    title,
+                    dateTime,
+                    date,
+                    time,
+                    imageData: imageData || null,
+                    completed: false,
+                    reminded: false
+                };
+                tasks.push(newTask);
+                saveTasks();
+                renderTasks();
+                // Проверить напоминание сразу (если время уже наступило)
+                checkReminders();
+            }
+
+            function toggleComplete(id) {
+                const task = tasks.find(t => t.id === id);
+                if (task) {
+                    task.completed = !task.completed;
+                    // Снятие галочки не сбрасывает reminded
+                    saveTasks();
+                    renderTasks();
+                }
+            }
+
+            function deleteTask(id) {
+                tasks = tasks.filter(t => t.id !== id);
+                saveTasks();
+                renderTasks();
+            }
+
+            function showNotification(title, body) {
+                if ('Notification' in window && Notification.permission === 'granted') {
+                    new Notification(title, { body, icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🔔</text></svg>' });
+                }
+            }
+
+            function checkReminders() {
+                const now = new Date();
+                let changed = false;
+                tasks.forEach(task => {
+                    if (!task.completed && !task.reminded) {
+                        const taskTime = new Date(task.dateTime);
+                        if (taskTime <= now) {
+                            showNotification('⏰ Напоминание о задаче', task.title);
+                            task.reminded = true;
+                            changed = true;
+                        }
+                    }
+                });
+                if (changed) {
+                    saveTasks();
+                    // Не перерисовываем, визуально ничего не меняется
+                }
+            }
+
+            // ---------- Модальное окно ----------
+            function openModal() {
+                // Установить дату по умолчанию на сегодня
+                const today = new Date().toISOString().split('T')[0];
+                taskDateInput.value = today;
+                taskTimeInput.value = '12:00';
+                taskImageInput.value = ''; // сброс файла
+                modalOverlay.classList.add('active');
+                taskTitleInput.focus();
+            }
+
+            function closeModal() {
+                modalOverlay.classList.remove('active');
+                taskForm.reset();
+            }
+
+            function handleFormSubmit(e) {
+                e.preventDefault();
+                const title = taskTitleInput.value.trim();
+                const date = taskDateInput.value;
+                const time = taskTimeInput.value;
+                if (!title || !date || !time) {
+                    alert('Пожалуйста, заполните все поля');
+                    return;
+                }
+
+                const file = taskImageInput.files[0];
+                if (file) {
+                    if (file.size > 500 * 1024) {
+                        alert('Размер картинки не должен превышать 500 КБ');
+                        return;
+                    }
+                    const reader = new FileReader();
+                    reader.onload = function(ev) {
+                        addTask(title, date, time, ev.target.result);
+                        closeModal();
+                    };
+                    reader.readAsDataURL(file);
+                } else {
+                    addTask(title, date, time, null);
+                    closeModal();
+                }
+            }
+
+            // ---------- Тема ----------
+            function applyTheme(theme) {
+                if (theme === 'dark') {
+                    document.body.classList.add('dark-theme');
+                    themeIcon.textContent = '☀️';
+                } else {
+                    document.body.classList.remove('dark-theme');
+                    themeIcon.textContent = '🌙';
+                }
+            }
+
+            function toggleTheme() {
+                const isDark = document.body.classList.contains('dark-theme');
+                const newTheme = isDark ? 'light' : 'dark';
+                localStorage.setItem(THEME_KEY, newTheme);
+                applyTheme(newTheme);
+            }
+
+            function loadTheme() {
+                const saved = localStorage.getItem(THEME_KEY) || 'light';
+                applyTheme(saved);
+            }
+
+            // ---------- Слушатели событий ----------
+            addTaskBtn.addEventListener('click', openModal);
+            modalClose.addEventListener('click', closeModal);
+            modalCancel.addEventListener('click', closeModal);
+            modalOverlay.addEventListener('click', (e) => {
+                if (e.target === modalOverlay) closeModal();
+            });
+            taskForm.addEventListener('submit', handleFormSubmit);
+            themeToggle.addEventListener('click', toggleTheme);
+
+            // Закрытие по Escape
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && modalOverlay.classList.contains('active')) {
+                    closeModal();
+                }
+            });
+
+            // Проверка напоминаний каждые 30 секунд
+            setInterval(checkReminders, 30000);
+
+            // ---------- Старт ----------
+            loadTasks();
+            loadTheme();
+            requestNotificationPermission();
+            // Первичная проверка напоминаний при загрузке
+            checkReminders();
+        })();
+    </script>
+</body>
+</html>
